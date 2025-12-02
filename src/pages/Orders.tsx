@@ -81,8 +81,16 @@ export default function Orders() {
                       <div className="space-y-2">
                         {order.order_items?.map((item) => (
                           <div key={item.id} className="flex justify-between text-sm">
-                            <span>
-                              {item.product_name} ({item.quantity_litres}L)
+                            <span className="max-w-[70%]">
+                              <span className="font-medium">{item.product_name}</span>{' '}
+                              <span className="text-muted-foreground">
+                                ({item.quantity_litres}L
+                                {item.variant_selection?.label ? ` • ${item.variant_selection.label}` : ''}
+                                {item.measurement_value
+                                  ? ` • ${(item.measurement_label || 'Measurement')}: ${item.measurement_value}`
+                                  : ''}
+                                )
+                              </span>
                             </span>
                             <span>₹{item.total_price.toFixed(2)}</span>
                           </div>

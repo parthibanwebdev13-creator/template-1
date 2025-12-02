@@ -13,8 +13,47 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ChevronRight, Upload, ArrowLeft, Pencil, Trash2 } from 'lucide-react';
+import { ChevronRight, Upload, ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { getCategoryIcon } from '@/lib/categoryIcons';
+import { Badge } from '@/components/ui/badge';
+import { VariantOption } from '@/types/products';
+import type { Json } from '@/integrations/supabase/types';
+
+type ProductFormState = {
+  name: string;
+  description: string;
+  price_per_litre: string;
+  offer_price_per_litre: string;
+  stock_quantity: string;
+  image_url: string;
+  category_id: string;
+  variant_enabled: boolean;
+  variant_title: string;
+  variant_values: VariantOption[];
+  measurement_enabled: boolean;
+  measurement_title: string;
+  measurement_values: string[];
+  is_active: boolean;
+  featured_in_offers: boolean;
+};
+
+const createInitialFormState = (): ProductFormState => ({
+  name: '',
+  description: '',
+  price_per_litre: '',
+  offer_price_per_litre: '',
+  stock_quantity: '',
+  image_url: '',
+  category_id: '',
+  variant_enabled: false,
+  variant_title: '',
+  variant_values: [],
+  measurement_enabled: false,
+  measurement_title: '',
+  measurement_values: [],
+  is_active: true,
+  featured_in_offers: false,
+});
 
 export default function AdminProducts() {
   const { isAdmin } = useAuth();
@@ -23,21 +62,14 @@ export default function AdminProducts() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price_per_litre: '',
-    offer_price_per_litre: '',
-    stock_quantity: '',
-    image_url: '',
-    category_id: '',
-    keywords: '',
-    is_active: true,
-    featured_in_offers: false,
-  });
+  const [productImageUploading, setProductImageUploading] = useState(false);
+  const [variantImageUploadingIndex, setVariantImageUploadingIndex] = useState<number | null>(null);
+  const [formData, setFormData] = useState<ProductFormState>(createInitialFormState());
+  const [variantValueInput, setVariantValueInput] = useState('');
+  const [measurementValueInput, setMeasurementValueInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const variantImageInputsRef = useRef<Record<number, HTMLInputElement | null>>({});
 
   const { data: products } = useQuery({
     queryKey: ['admin-products'],
@@ -70,80 +102,138 @@ export default function AdminProducts() {
     },
   });
 
-  const handleImageUpload = async (file: File) => {
-    setUploading(true);
-    try {
-      // File validation
-      const maxSize = 5 * 1024 * 1024; // 5MB
-      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
-      
-      if (file.size > maxSize) {
-        throw new Error('File size must be less than 5MB');
+  const normalizeVariantValues = (values: any): VariantOption[] => {
+    if (!Array.isArray(values)) return [];
+    const normalized: VariantOption[] = [];
+    values.forEach((value) => {
+      if (!value) return;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) {
+          normalized.push({ label: trimmed });
+        }
+        return;
       }
-      
-      if (!allowedTypes.includes(file.type)) {
-        throw new Error('Only JPEG, PNG, WebP, and GIF images are allowed');
-      }
-
-      // Check if user is authenticated and has admin privileges
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('You must be logged in to upload images');
-      }
-
-      // Check admin role
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .eq('role', 'admin')
-        .single();
-
-      if (!roleData) {
-        throw new Error('Admin privileges required to upload images');
-      }
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `products/${fileName}`;
-
-      console.log('Uploading file:', { fileName, filePath, fileSize: file.size, fileType: file.type });
-
-      const { error: uploadError } = await supabase.storage
-        .from('product-images')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) {
-        console.error('Supabase upload error:', uploadError);
-        
-        if (uploadError.message.includes('bucket not found')) {
-          throw new Error('Storage bucket not found. Please contact administrator to set up the product-images bucket.');
-        } else if (uploadError.message.includes('permission denied')) {
-          throw new Error('Permission denied. Please ensure you have admin privileges.');
-        } else if (uploadError.message.includes('file size')) {
-          throw new Error('File too large. Please choose a smaller image.');
+      if (typeof value === 'object') {
+        const label = typeof value.label === 'string' ? value.label.trim() : '';
+        if (!label) return;
+        const imageUrl =
+          typeof value.image_url === 'string' && value.image_url.length > 0 ? value.image_url : undefined;
+        if (imageUrl) {
+          normalized.push({ label, image_url: imageUrl });
         } else {
-          throw new Error(`Upload failed: ${uploadError.message}`);
+          normalized.push({ label });
         }
       }
+    });
+    return normalized;
+  };
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(filePath);
+  const serializeVariantValues = (values: VariantOption[]): Json =>
+    values.map((variant) => ({
+      label: variant.label,
+      image_url: variant.image_url ?? null,
+    })) as Json;
 
-      console.log('Upload successful, public URL:', publicUrl);
+  const uploadImageToStorage = async (file: File) => {
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
 
-      setFormData(prev => ({ ...prev, image_url: publicUrl }));
+    if (file.size > maxSize) {
+      throw new Error('File size must be less than 5MB');
+    }
+
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('Only JPEG, PNG, WebP, and GIF images are allowed');
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error('You must be logged in to upload images');
+    }
+
+    const { data: roleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('role', 'admin')
+      .single();
+
+    if (!roleData) {
+      throw new Error('Admin privileges required to upload images');
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `products/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      if (uploadError.message.includes('bucket not found')) {
+        throw new Error('Storage bucket not found. Please contact administrator to set up the product-images bucket.');
+      } else if (uploadError.message.includes('permission denied')) {
+        throw new Error('Permission denied. Please ensure you have admin privileges.');
+      } else if (uploadError.message.includes('file size')) {
+        throw new Error('File too large. Please choose a smaller image.');
+      } else {
+        throw new Error(`Upload failed: ${uploadError.message}`);
+      }
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('product-images').getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
+  const handleProductImageUpload = async (file: File) => {
+    setProductImageUploading(true);
+    try {
+      const publicUrl = await uploadImageToStorage(file);
+      setFormData((prev) => ({ ...prev, image_url: publicUrl }));
       toast.success('Image uploaded successfully');
     } catch (error: any) {
-      console.error('Upload error details:', error);
       const errorMessage = error.message || 'Failed to upload image';
       toast.error(errorMessage);
     } finally {
-      setUploading(false);
+      setProductImageUploading(false);
+    }
+  };
+
+  const handleVariantImageUpload = async (index: number, file: File) => {
+    setVariantImageUploadingIndex(index);
+    try {
+      const publicUrl = await uploadImageToStorage(file);
+      setFormData((prev) => {
+        const updatedVariants = [...prev.variant_values];
+        if (!updatedVariants[index]) {
+          return prev;
+        }
+        updatedVariants[index] = {
+          ...updatedVariants[index],
+          image_url: publicUrl,
+        };
+        return { ...prev, variant_values: updatedVariants };
+      });
+      toast.success('Variant image updated');
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to upload variant image';
+      toast.error(errorMessage);
+    } finally {
+      setVariantImageUploadingIndex(null);
+      const inputRef = variantImageInputsRef.current[index];
+      if (inputRef) {
+        inputRef.value = '';
+      }
     }
   };
 
@@ -151,6 +241,24 @@ export default function AdminProducts() {
     mutationFn: async () => {
       if (!formData.name || !formData.price_per_litre || !formData.stock_quantity) {
         throw new Error('Please fill in all required fields');
+      }
+
+      if (formData.variant_enabled) {
+        if (!formData.variant_title.trim()) {
+          throw new Error('Please provide a title for the variant options');
+        }
+        if (formData.variant_values.length === 0) {
+          throw new Error('Add at least one variant option with a label');
+        }
+      }
+
+      if (formData.measurement_enabled) {
+        if (!formData.measurement_title.trim()) {
+          throw new Error('Please provide a title for the measurement options');
+        }
+        if (formData.measurement_values.length === 0) {
+          throw new Error('Add at least one measurement option value');
+        }
       }
 
       if (editingProduct) {
@@ -162,7 +270,19 @@ export default function AdminProducts() {
           offer_price_per_litre: formData.offer_price_per_litre ? parseFloat(formData.offer_price_per_litre) : null,
           stock_quantity: parseInt(formData.stock_quantity),
           category_id: formData.category_id || null,
-          keywords: formData.keywords ? formData.keywords.split(',').map(k => k.trim()).filter(k => k) : null,
+          variant_enabled: formData.variant_enabled,
+          variant_title: formData.variant_enabled && formData.variant_title ? formData.variant_title : null,
+          variant_values:
+            formData.variant_enabled && formData.variant_values.length > 0
+              ? serializeVariantValues(formData.variant_values)
+              : null,
+          measurement_enabled: formData.measurement_enabled,
+          measurement_title:
+            formData.measurement_enabled && formData.measurement_title ? formData.measurement_title : null,
+          measurement_values:
+            formData.measurement_enabled && formData.measurement_values.length > 0
+              ? formData.measurement_values
+              : null,
           is_active: formData.is_active,
           featured_in_offers: formData.featured_in_offers,
         }).eq('id', editingProduct.id);
@@ -176,7 +296,19 @@ export default function AdminProducts() {
           offer_price_per_litre: formData.offer_price_per_litre ? parseFloat(formData.offer_price_per_litre) : null,
           stock_quantity: parseInt(formData.stock_quantity),
           category_id: formData.category_id || null,
-          keywords: formData.keywords ? formData.keywords.split(',').map(k => k.trim()).filter(k => k) : null,
+          variant_enabled: formData.variant_enabled,
+          variant_title: formData.variant_enabled && formData.variant_title ? formData.variant_title : null,
+          variant_values:
+            formData.variant_enabled && formData.variant_values.length > 0
+              ? serializeVariantValues(formData.variant_values)
+              : null,
+          measurement_enabled: formData.measurement_enabled,
+          measurement_title:
+            formData.measurement_enabled && formData.measurement_title ? formData.measurement_title : null,
+          measurement_values:
+            formData.measurement_enabled && formData.measurement_values.length > 0
+              ? formData.measurement_values
+              : null,
           is_active: formData.is_active,
           featured_in_offers: formData.featured_in_offers,
         });
@@ -187,18 +319,9 @@ export default function AdminProducts() {
       toast.success(editingProduct ? 'Product updated successfully' : 'Product created successfully');
       setShowAddForm(false);
       setEditingProduct(null);
-      setFormData({ 
-        name: '',
-        description: '',
-        price_per_litre: '',
-        offer_price_per_litre: '',
-        stock_quantity: '',
-        image_url: '',
-        category_id: '',
-        keywords: '',
-        is_active: true,
-        featured_in_offers: false,
-      });
+      setFormData(createInitialFormState());
+      setVariantValueInput('');
+      setMeasurementValueInput('');
       setImageFile(null);
       queryClient.invalidateQueries({ queryKey: ['admin-products'] });
     },
@@ -231,18 +354,78 @@ export default function AdminProducts() {
       stock_quantity: product.stock_quantity.toString(),
       image_url: product.image_url || '',
       category_id: product.category_id || '',
-      keywords: product.keywords ? product.keywords.join(', ') : '',
+      variant_enabled: Boolean(product.variant_enabled),
+      variant_title: product.variant_title || '',
+      variant_values: normalizeVariantValues(product.variant_values),
+      measurement_enabled: Boolean(product.measurement_enabled),
+      measurement_title: product.measurement_title || '',
+      measurement_values: Array.isArray(product.measurement_values) ? product.measurement_values : [],
       is_active: product.is_active,
       featured_in_offers: product.featured_in_offers || false,
     });
+    setVariantValueInput('');
+    setMeasurementValueInput('');
+    setImageFile(null);
     setShowAddForm(true);
   };
 
+  const handleVariantLabelChange = (index: number, label: string) => {
+    setFormData((prev) => {
+      const updated = [...prev.variant_values];
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], label };
+      return { ...prev, variant_values: updated };
+    });
+  };
 
-  if (!isAdmin) {
-    navigate('/');
-    return null;
-  }
+  const addVariantValue = () => {
+    const label = variantValueInput.trim();
+    if (!label) return;
+    if (formData.variant_values.some((variant) => variant.label.toLowerCase() === label.toLowerCase())) {
+      toast.error('Variant already exists');
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      variant_values: [...prev.variant_values, { label }],
+    }));
+    setVariantValueInput('');
+  };
+
+  const removeVariantValue = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      variant_values: prev.variant_values.filter((_, i) => i !== index),
+    }));
+    delete variantImageInputsRef.current[index];
+  };
+
+  const clearVariantImage = (index: number) => {
+    setFormData((prev) => {
+      const updated = [...prev.variant_values];
+      if (!updated[index]) return prev;
+      updated[index] = { ...updated[index], image_url: null };
+      return { ...prev, variant_values: updated };
+    });
+  };
+
+  const addMeasurementValue = () => {
+    if (measurementValueInput.trim()) {
+      setFormData({
+        ...formData,
+        measurement_values: [...formData.measurement_values, measurementValueInput.trim()],
+      });
+      setMeasurementValueInput('');
+    }
+  };
+
+  const removeMeasurementValue = (index: number) => {
+    setFormData({
+      ...formData,
+      measurement_values: formData.measurement_values.filter((_, i) => i !== index),
+    });
+  };
+
 
   if (!isAdmin) {
     navigate('/');
@@ -268,10 +451,17 @@ export default function AdminProducts() {
                 stock_quantity: '',
                 image_url: '',
                 category_id: '',
-                keywords: '',
+                variant_enabled: false,
+                variant_title: '',
+                variant_values: [],
+                measurement_enabled: false,
+                measurement_title: '',
+                measurement_values: [],
                 is_active: true,
                 featured_in_offers: false,
               });
+              setVariantValueInput('');
+              setMeasurementValueInput('');
             }}
             className="mb-6"
           >
@@ -330,16 +520,166 @@ export default function AdminProducts() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Keywords</Label>
-                  <Input 
-                    value={formData.keywords} 
-                    onChange={(e) => setFormData({ ...formData, keywords: e.target.value })} 
-                    placeholder="Enter keywords separated by commas (e.g., organic, fresh, premium)" 
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Separate multiple keywords with commas. These help with product search and discovery.
-                  </p>
+                {/* Variant Section */}
+                <div className="space-y-4 border rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <Label>Variant</Label>
+                    <Switch
+                      checked={formData.variant_enabled}
+                      onCheckedChange={(checked) => setFormData({ ...formData, variant_enabled: checked })}
+                    />
+                  </div>
+                  {formData.variant_enabled && (
+                    <div className="space-y-4">
+                      <div>
+                        <Label>Variant Title (e.g., Color, Size)</Label>
+                        <Input
+                          value={formData.variant_title}
+                          onChange={(e) => setFormData({ ...formData, variant_title: e.target.value })}
+                          placeholder="Enter variant title (e.g., Color)"
+                        />
+                      </div>
+                      <div>
+                        <Label>Add Variant Options</Label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            value={variantValueInput}
+                            onChange={(e) => setVariantValueInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addVariantValue();
+                              }
+                            }}
+                            placeholder="Enter variant value (e.g., Red)"
+                          />
+                          <Button type="button" onClick={addVariantValue} size="sm">
+                            Add Option
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Save the option label first, then upload an optional image/icon for that variant.
+                        </p>
+                      </div>
+                      {formData.variant_values.length > 0 && (
+                        <div className="space-y-3">
+                          {formData.variant_values.map((variant, index) => (
+                            <div key={`${variant.label}-${index}`} className="rounded-lg border p-3 space-y-3">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+                                <div className="flex-1">
+                                  <Label className="text-xs text-muted-foreground">Label</Label>
+                                  <Input
+                                    value={variant.label}
+                                    onChange={(e) => handleVariantLabelChange(index, e.target.value)}
+                                    placeholder="Variant label"
+                                  />
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive self-start"
+                                  onClick={() => removeVariantValue(index)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-4">
+                                {variant.image_url ? (
+                                  <div className="flex items-center gap-3">
+                                    <img
+                                      src={variant.image_url}
+                                      alt={`${variant.label} preview`}
+                                      className="h-16 w-16 rounded-md object-cover border"
+                                    />
+                                    <Button variant="outline" size="sm" onClick={() => clearVariantImage(index)}>
+                                      Remove Image
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">No image uploaded yet</p>
+                                )}
+                                <div className="space-y-1">
+                                  <Input
+                                    type="file"
+                                    accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+                                    disabled={variantImageUploadingIndex === index}
+                                    ref={(el) => {
+                                      variantImageInputsRef.current[index] = el;
+                                    }}
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        handleVariantImageUpload(index, file);
+                                      }
+                                    }}
+                                  />
+                                  {variantImageUploadingIndex === index && (
+                                    <p className="text-xs text-muted-foreground">Uploading...</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Measurement Section */}
+                <div className="space-y-3 border rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <Label>Measurement</Label>
+                    <Switch 
+                      checked={formData.measurement_enabled} 
+                      onCheckedChange={(checked) => setFormData({ ...formData, measurement_enabled: checked })} 
+                    />
+                  </div>
+                  {formData.measurement_enabled && (
+                    <div className="space-y-3">
+                      <div>
+                        <Label>Measurement Title (e.g., Litre, Kg, Size)</Label>
+                        <Input 
+                          value={formData.measurement_title} 
+                          onChange={(e) => setFormData({ ...formData, measurement_title: e.target.value })} 
+                          placeholder="Enter measurement title (e.g., Litre)" 
+                        />
+                      </div>
+                      <div>
+                        <Label>Measurement Values</Label>
+                        <div className="flex gap-2">
+                          <Input 
+                            value={measurementValueInput} 
+                            onChange={(e) => setMeasurementValueInput(e.target.value)}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addMeasurementValue();
+                              }
+                            }}
+                            placeholder="Enter measurement value (e.g., 1L)" 
+                          />
+                          <Button type="button" onClick={addMeasurementValue} size="sm">Add</Button>
+                        </div>
+                        {formData.measurement_values.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {formData.measurement_values.map((value, index) => (
+                              <Badge key={index} variant="default" className="flex items-center gap-1">
+                                {formData.measurement_title && `${formData.measurement_title}: `}{value}
+                                <button
+                                  type="button"
+                                  onClick={() => removeMeasurementValue(index)}
+                                  className="ml-1 hover:text-destructive"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -407,12 +747,12 @@ export default function AdminProducts() {
                       const file = e.dataTransfer.files?.[0];
                       if (file) {
                         setImageFile(file);
-                        handleImageUpload(file);
+                        handleProductImageUpload(file);
                       }
                     }}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    {uploading ? (
+                    {productImageUploading ? (
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
                         <p className="text-sm text-primary">Uploading...</p>
@@ -431,14 +771,14 @@ export default function AdminProducts() {
                         const file = e.target.files?.[0];
                         if (file) {
                           setImageFile(file);
-                          handleImageUpload(file);
+                          handleProductImageUpload(file);
                         }
                       }}
                       className="mt-2"
-                      disabled={uploading}
+                      disabled={productImageUploading}
                       ref={fileInputRef}
                     />
-                    {imageFile && !uploading && (
+                    {imageFile && !productImageUploading && (
                       <div className="mt-2 p-2 bg-muted rounded text-xs">
                         <p className="font-medium">Selected: {imageFile.name}</p>
                         <p className="text-muted-foreground">
@@ -480,7 +820,7 @@ export default function AdminProducts() {
             <Button 
               onClick={() => createProductMutation.mutate()} 
               size="lg" 
-              disabled={createProductMutation.isPending || uploading}
+              disabled={createProductMutation.isPending || productImageUploading}
               className="bg-green-600 hover:bg-green-700"
             >
               {createProductMutation.isPending ? 'Saving...' : (editingProduct ? 'Update Product' : 'Save Product')}
@@ -489,7 +829,7 @@ export default function AdminProducts() {
               variant="destructive" 
               size="lg" 
               onClick={() => setShowAddForm(false)}
-              disabled={createProductMutation.isPending || uploading}
+              disabled={createProductMutation.isPending || productImageUploading}
             >
               Cancel
             </Button>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -12,6 +12,28 @@ import { Star, ShoppingCart, Heart, Minus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import ProductCard from '@/components/ProductCard';
+import { VariantOption } from '@/types/products';
+
+const parseVariantOptions = (values: any): VariantOption[] => {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        const label = value.trim();
+        return label ? { label } : null;
+      }
+      if (typeof value === 'object') {
+        const label = typeof value.label === 'string' ? value.label.trim() : '';
+        if (!label) return null;
+        const image_url =
+          typeof value.image_url === 'string' && value.image_url.length > 0 ? value.image_url : null;
+        return { label, image_url };
+      }
+      return null;
+    })
+    .filter((value): value is VariantOption => Boolean(value));
+};
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -21,6 +43,9 @@ export default function ProductDetail() {
   const [quantity, setQuantity] = useState(1);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
+  const [selectedVariant, setSelectedVariant] = useState<VariantOption | null>(null);
+  const [selectedMeasurement, setSelectedMeasurement] = useState<string | null>(null);
+  const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
 
   const { data: product } = useQuery({
     queryKey: ['product', id],
@@ -77,9 +102,81 @@ export default function ProductDetail() {
     enabled: !!product?.category_id,
   });
 
+  const variantOptions = useMemo(
+    () => parseVariantOptions(product?.variant_values),
+    [product?.variant_values],
+  );
+  const hasVariants = Boolean(product?.variant_enabled && variantOptions.length > 0);
+  const measurementValues = useMemo(
+    () => (Array.isArray(product?.measurement_values) ? product.measurement_values : []),
+    [product?.measurement_values],
+  );
+  const hasMeasurements = Boolean(product?.measurement_enabled && measurementValues.length > 0);
+
+  useEffect(() => {
+    if (product) {
+      setActiveImageUrl(product.image_url || null);
+      setSelectedVariant(null);
+      setSelectedMeasurement(null);
+    }
+  }, [product]);
+
+useEffect(() => {
+  if (!hasVariants) {
+    setSelectedVariant(null);
+    return;
+  }
+  setSelectedVariant((prev) => {
+    if (prev && variantOptions.some((option) => option.label === prev.label)) {
+      return prev;
+    }
+    return variantOptions[0] || null;
+  });
+}, [hasVariants, variantOptions]);
+
+useEffect(() => {
+  if (!hasMeasurements) {
+    setSelectedMeasurement(null);
+    return;
+  }
+  setSelectedMeasurement((prev) => {
+    if (prev && measurementValues.includes(prev)) {
+      return prev;
+    }
+    return measurementValues[0] || null;
+  });
+}, [hasMeasurements, measurementValues]);
+
+  const handleSelectVariant = (option: VariantOption) => {
+    setSelectedVariant(option);
+    if (option.image_url) {
+      setActiveImageUrl(option.image_url);
+    } else {
+      setActiveImageUrl(product?.image_url || null);
+    }
+  };
+
+  const handleSelectMeasurement = (value: string) => {
+    setSelectedMeasurement(value);
+  };
+
   const addToCartMutation = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error('Please login');
+      if (!product) throw new Error('Product not found');
+      if (hasVariants && !selectedVariant) {
+        throw new Error(`Please select a ${product.variant_title || 'variant'}`);
+      }
+      if (hasMeasurements && !selectedMeasurement) {
+        throw new Error(`Please select a ${product.measurement_title || 'measurement option'}`);
+      }
+
+      const variantPayload = selectedVariant
+        ? {
+            label: selectedVariant.label,
+            image_url: selectedVariant.image_url ?? null,
+          }
+        : null;
 
       const { error } = await supabase
         .from('cart_items')
@@ -87,6 +184,9 @@ export default function ProductDetail() {
           user_id: user.id,
           product_id: id!,
           quantity_litres: quantity,
+          variant_selection: variantPayload,
+          measurement_label: product.measurement_title || null,
+          measurement_value: selectedMeasurement,
         }, {
           onConflict: 'user_id,product_id',
         });
@@ -95,6 +195,7 @@ export default function ProductDetail() {
     },
     onSuccess: () => {
       toast.success('Added to cart');
+      queryClient.invalidateQueries({ queryKey: ['cart', user?.id] });
       queryClient.invalidateQueries({ queryKey: ['cart-count'] });
     },
     onError: (error: any) => {
@@ -145,10 +246,14 @@ export default function ProductDetail() {
   const discountPercentage = hasDiscount
     ? Math.round(((product.price_per_litre - product.offer_price_per_litre!) / product.price_per_litre) * 100)
     : 0;
+  const variantTitle = product.variant_title || 'Variant';
+  const measurementTitle = product.measurement_title || 'Measurement';
 
   const averageRating = reviews?.length
     ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
     : 0;
+  const displayImage = activeImageUrl || product.image_url || '/placeholder.svg';
+  const selectionMissing = (hasVariants && !selectedVariant) || (hasMeasurements && !selectedMeasurement);
 
   return (
     <div className="min-h-screen bg-background">
@@ -159,7 +264,7 @@ export default function ProductDetail() {
           {/* Product Image */}
           <div className="aspect-square rounded-xl overflow-hidden bg-muted">
             <img
-              src={product.image_url || '/placeholder.svg'}
+              src={displayImage}
               alt={product.name}
               className="w-full h-full object-cover"
             />
@@ -214,6 +319,83 @@ export default function ProductDetail() {
                   ? `${product.stock_quantity} litres available`
                   : 'Out of stock'}
               </p>
+
+              {hasVariants && (
+                <div className="space-y-3 mt-6">
+                  <p className="font-semibold">{variantTitle}:</p>
+                  <div className="flex flex-wrap gap-3">
+                    {variantOptions.map((option) => {
+                      const isSelected = selectedVariant?.label === option.label;
+                      return (
+                        <button
+                          key={option.label}
+                          type="button"
+                          onClick={() => handleSelectVariant(option)}
+                          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
+                            isSelected
+                              ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                              : 'border-muted-foreground/30 hover:border-primary/60'
+                          }`}
+                        >
+                          {option.image_url && (
+                            <img
+                              src={option.image_url}
+                              alt={`${option.label} preview`}
+                              className="h-6 w-6 rounded-full object-cover"
+                            />
+                          )}
+                          <span>{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedVariant && (
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      Selected {variantTitle}:
+                      <Badge variant="secondary" className="flex items-center gap-2">
+                        {selectedVariant.image_url && (
+                          <img
+                            src={selectedVariant.image_url}
+                            alt={`${selectedVariant.label} preview`}
+                            className="h-5 w-5 rounded-full object-cover"
+                          />
+                        )}
+                        {selectedVariant.label}
+                      </Badge>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {hasMeasurements && (
+                <div className="space-y-3 mt-4">
+                  <p className="font-semibold">{measurementTitle}:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {measurementValues.map((value) => {
+                      const isSelected = selectedMeasurement === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleSelectMeasurement(value)}
+                          className={`rounded-full border px-4 py-2 text-sm transition ${
+                            isSelected
+                              ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                              : 'border-muted-foreground/30 hover:border-primary/60'
+                          }`}
+                        >
+                          {value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedMeasurement && (
+                    <p className="text-sm text-muted-foreground">
+                      Selected {measurementTitle}: <Badge variant="outline">{selectedMeasurement}</Badge>
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -249,7 +431,7 @@ export default function ProductDetail() {
                   className="flex-1"
                   size="lg"
                   onClick={() => addToCartMutation.mutate()}
-                  disabled={product.stock_quantity === 0 || addToCartMutation.isPending}
+                  disabled={product.stock_quantity === 0 || addToCartMutation.isPending || selectionMissing}
                 >
                   <ShoppingCart className="mr-2 h-5 w-5" />
                   Add to Cart

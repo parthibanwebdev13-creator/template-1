@@ -103,6 +103,23 @@ export default function Cart() {
                           <p className="text-muted-foreground mb-2">
                             ₹{price.toFixed(2)} / litre
                           </p>
+                          {(item.variant_selection?.label || item.measurement_value) && (
+                            <div className="text-xs text-muted-foreground space-y-1 mb-3">
+                              {item.variant_selection?.label && (
+                                <div>
+                                  Variant: <span className="font-medium">{item.variant_selection.label}</span>
+                                </div>
+                              )}
+                              {item.measurement_value && (
+                                <div>
+                                  {(item.measurement_label ||
+                                    product.measurement_title ||
+                                    'Measurement') + ':'}{' '}
+                                  <span className="font-medium">{item.measurement_value}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="flex items-center gap-2">
                             <Button
                               variant="outline"

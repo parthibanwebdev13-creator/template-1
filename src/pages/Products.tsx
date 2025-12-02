@@ -1,16 +1,12 @@
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import Navbar from '@/components/Navbar';
 import ProductCard from '@/components/ProductCard';
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 export default function Products() {
-  const { user, loading } = useAuth();
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
 
   const { data: products, refetch, isFetching } = useQuery({
@@ -29,19 +25,6 @@ export default function Products() {
       return data;
     },
   });
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-lg">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!loading && !user) {
-    navigate('/auth');
-    return null;
-  }
 
   return (
     <div className="min-h-screen bg-background">

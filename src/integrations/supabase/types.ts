@@ -18,24 +18,33 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          measurement_label: string | null
+          measurement_value: string | null
           product_id: string
           quantity_litres: number
+          variant_selection: Json | null
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
+          measurement_label?: string | null
+          measurement_value?: string | null
           product_id: string
           quantity_litres: number
+          variant_selection?: Json | null
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
           id?: string
+          measurement_label?: string | null
+          measurement_value?: string | null
           product_id?: string
           quantity_litres?: number
+          variant_selection?: Json | null
           updated_at?: string
           user_id?: string
         }
@@ -152,32 +161,41 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          measurement_label: string | null
+          measurement_value: string | null
           order_id: string
           price_per_litre: number
           product_id: string
           product_name: string
           quantity_litres: number
           total_price: number
+          variant_selection: Json | null
         }
         Insert: {
           created_at?: string
           id?: string
+          measurement_label?: string | null
+          measurement_value?: string | null
           order_id: string
           price_per_litre: number
           product_id: string
           product_name: string
           quantity_litres: number
           total_price: number
+          variant_selection?: Json | null
         }
         Update: {
           created_at?: string
           id?: string
+          measurement_label?: string | null
+          measurement_value?: string | null
           order_id?: string
           price_per_litre?: number
           product_id?: string
           product_name?: string
           quantity_litres?: number
           total_price?: number
+          variant_selection?: Json | null
         }
         Relationships: [
           {
@@ -250,11 +268,17 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean
+          measurement_enabled: boolean
+          measurement_title: string | null
+          measurement_values: string[] | null
           name: string
           offer_price_per_litre: number | null
           price_per_litre: number
           stock_quantity: number
           updated_at: string
+          variant_enabled: boolean
+          variant_title: string | null
+          variant_values: Json | null
         }
         Insert: {
           category_id?: string | null
@@ -264,11 +288,17 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          measurement_enabled?: boolean
+          measurement_title?: string | null
+          measurement_values?: string[] | null
           name: string
           offer_price_per_litre?: number | null
           price_per_litre: number
           stock_quantity?: number
           updated_at?: string
+          variant_enabled?: boolean
+          variant_title?: string | null
+          variant_values?: Json | null
         }
         Update: {
           category_id?: string | null
@@ -278,11 +308,17 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean
+          measurement_enabled?: boolean
+          measurement_title?: string | null
+          measurement_values?: string[] | null
           name?: string
           offer_price_per_litre?: number | null
           price_per_litre?: number
           stock_quantity?: number
           updated_at?: string
+          variant_enabled?: boolean
+          variant_title?: string | null
+          variant_values?: Json | null
         }
         Relationships: [
           {

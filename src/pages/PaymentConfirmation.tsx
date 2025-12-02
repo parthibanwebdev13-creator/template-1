@@ -40,7 +40,15 @@ export default function PaymentConfirmation() {
   const formattedItems = useMemo(() => {
     if (!order?.order_items?.length) return '';
     return order.order_items
-      .map((it: any) => `-${it.product_name} × ${Number(it.quantity_litres)} — ₹${Number(it.total_price).toFixed(2)}`)
+      .map((it: any) => {
+        const variantPart = it.variant_selection?.label ? ` [${it.variant_selection.label}]` : '';
+        const measurementPart = it.measurement_value
+          ? ` (${(it.measurement_label || 'Measurement')}: ${it.measurement_value})`
+          : '';
+        return `- ${it.product_name}${variantPart}${measurementPart} × ${Number(it.quantity_litres)} — ₹${Number(
+          it.total_price,
+        ).toFixed(2)}`;
+      })
       .join('\n');
   }, [order]);
 

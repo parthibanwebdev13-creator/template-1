@@ -27,7 +27,7 @@ export default function Payment() {
     enabled: !!orderId,
   });
 
-  const orderLabel = order?.order_number || order?.id || 'Order';
+  const orderLabel = order?.discount_amount ? `Order: ${order.order_number || order.id} - ${order.discount_amount}` : order?.order_number || order?.id || 'Order';
   const amount = Number(order?.final_amount || 0).toFixed(2);
   const upiId = '7449213304@pthdfc';
   const upiPayeeName = 'MerchantName';

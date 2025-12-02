@@ -192,7 +192,13 @@ export default function AdminOrders() {
                 <div key={it.id} className="flex items-center justify-between text-sm">
                   <div className="truncate">
                     <span className="font-medium">{it.product_name}</span>
-                    <span className="text-muted-foreground ml-2">x {it.quantity_litres}L</span>
+                    <span className="text-muted-foreground ml-2">
+                      x {it.quantity_litres}L
+                      {it.variant_selection?.label ? ` • ${it.variant_selection.label}` : ''}
+                      {it.measurement_value
+                        ? ` • ${(it.measurement_label || 'Measurement')}: ${it.measurement_value}`
+                        : ''}
+                    </span>
                   </div>
                   <div>₹{it.total_price}</div>
                 </div>

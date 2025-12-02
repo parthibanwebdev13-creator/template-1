@@ -87,6 +87,9 @@ export default function Checkout() {
       price_per_litre: item.products?.offer_price_per_litre || item.products?.price_per_litre || 0,
       total_price:
         (item.products?.offer_price_per_litre || item.products?.price_per_litre || 0) * item.quantity_litres,
+      variant_selection: item.variant_selection || null,
+      measurement_label: item.measurement_label || item.products?.measurement_title || null,
+      measurement_value: item.measurement_value || null,
     }));
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
